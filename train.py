@@ -16,7 +16,9 @@ from sklearn.model_selection import train_test_split
 from copy import deepcopy
 from keras.utils.np_utils import to_categorical
 from utils import *
-np.random.seed(1)
+
+random.seed(42)
+tf.random.set_seed(42)
 
 alpha = 0.1
 beta = 0.1
@@ -27,7 +29,7 @@ global_lr = 0.001
 batch_size = 128
 emb_size = 128
 local_epochs = 10
-global_epochs = 30
+global_epochs = 3000
 fed_epoch = 5
 trace_len = 5000
 client_num = 4
@@ -177,12 +179,13 @@ def global_train(model, local_weights, global_data, seed_class_dict, G_model, D_
 
     new_weight = local_weights.copy()
     optimizer = SGD(learning_rate=global_lr, decay=1e-6, momentum=0.9, nesterov=True)
-    optimizer_G = SGD(learning_rate=global_lr, decay=1e-6, momentum=0.9, nesterov=True)
-    optimizer_D = SGD(learning_rate=global_lr, decay=1e-6, momentum=0.9, nesterov=True)
-
+    #optimizer_G = SGD(learning_rate=global_lr, decay=1e-6, momentum=0.9, nesterov=True)
+    #optimizer_D = SGD(learning_rate=global_lr, decay=1e-6, momentum=0.9, nesterov=True)
+    optimizer_G = Adam(lr=global_lr)
+    optimizer_D = Adam(lr=global_lr)
     global_data = tf.keras.backend.concatenate(global_data, axis=0)
     global_data = np.reshape(global_data,[global_data.shape[0],global_data.shape[1],1])
-    for e in range(global_epochs*100):
+    for e in range(global_epochs):
         train_progbar_G = utils.Progbar(global_epochs)
         train_progbar_D = utils.Progbar(global_epochs)
         train_acc = utils.Progbar(global_epochs)
@@ -289,7 +292,7 @@ def test_model(model, fine_path, test_path, client, local, epoch,file_name): #ไป
                 x_train, y_train = fine_data, fine_label
             else:
                 x_train, _, y_train, _ = train_test_split(fine_data, fine_label, train_size=shot * class_num,
-                                                          random_state=1,stratify=fine_label)
+                                                          random_state=42,stratify=fine_label)
             _,emb_train = model.predict(x_train)
 
             knn = KNeighborsClassifier(n_neighbors=shot, weights='distance', p=2, metric='cosine', algorithm='brute')
@@ -351,7 +354,7 @@ def test_model_other(model, fine_path, test_path, client, local, epoch,file_name
             x_train, y_train = fine_data, fine_label
         else:
             x_train, _, y_train, _ = train_test_split(fine_data, fine_label, train_size=shot * class_num,
-                                                      random_state=1, stratify=fine_label)
+                                                      random_state=42, stratify=fine_label)
         _,emb_train = model.predict(x_train)
 
 
@@ -404,8 +407,8 @@ def my_train():
 
         label_num = len(set(label))
 
-        x_train, _, y_train, _ = train_test_split(data, label, train_size=25 * label_num, random_state=1, stratify=label)
-        x_fine, x_test, y_fine, y_test = train_test_split(data, label, train_size=20 * label_num, test_size=70 * label_num, random_state=1, stratify=label)
+        x_train, _, y_train, _ = train_test_split(data, label, train_size=25 * label_num, random_state=42, stratify=label)
+        x_fine, x_test, y_fine, y_test = train_test_split(data, label, train_size=20 * label_num, test_size=70 * label_num, random_state=42, stratify=label)
 
         seed_dict = {}
         seed_index = []
