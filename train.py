@@ -41,8 +41,6 @@ has_seed = True
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-binary_loss = tf.keras.losses.BinaryCrossentropy()
-
 def local_loss(emb_a, emb_p, emb_n):
     positive_sim = Dot(axes=-1)([emb_a, emb_p])
     negative_sim = Dot(axes=-1)([emb_a, emb_n])
@@ -50,13 +48,8 @@ def local_loss(emb_a, emb_p, emb_n):
     BDC_loss = Dot(axes=-1)([emb_a, emb_p])
     return K.mean(triplet_loss)
 
-def global_loss(wastein_A, wastein_B):
-    pos = Dot(axes=-1)([wastein_A, wastein_B])
-    loss = K.maximum(omiga - pos, 0.0)
-    return K.mean(loss)
-
 def local_init(data_path, seed_data, seed_label):
-    # 读取数据集
+    # load datasets
     npzfile = np.load(data_path, allow_pickle=True, encoding='latin1')
     ori_data = npzfile['data']
     ori_label = npzfile["labels"]
@@ -73,7 +66,7 @@ def local_init(data_path, seed_data, seed_label):
     label_list.sort(key=list(label).index)
     num_classes = len(label_list)
 
-    # 构建跟踪和类之间的映射
+    # Build a mapping between traces and classes
     classid_to_ids = {}
     for i in range(len(all_traces)):
         key = label_list.index(label[i])
@@ -92,7 +85,7 @@ def local_init(data_path, seed_data, seed_label):
 def global_int(seed_path):
     seed_data = []
     seed_label = []
-    # 建立server训练的seed数据集
+    # Create a seed dataset for server training
     global_data = []
     global_label = []
     for c in range(client_num):
@@ -109,13 +102,12 @@ def global_int(seed_path):
             global_data = np.vstack((global_data, data))
             global_label = np.hstack((global_label, label))
 
-    # 为服务器生成采样器
     label_list = list(set(global_label))
     label_list.sort(key=list(global_label).index)
     num_classes = len(label_list)
     #tr = int(global_data.shape[0] / num_classes)
 
-    # 构建跟踪和类之间的映射
+    # Build a mapping between traces and classes
     classid_to_ids = {}
     for i in range(len(global_data)):
         key = label_list.index(global_label[i])
@@ -141,7 +133,7 @@ def loacl_train(shared_model, global_gen_hard, id_to_classid, all_traces, Xa_tra
     #optimizer = RMSprop(learning_rate=local_lr, decay=0)
     optimizer = SGD(learning_rate=local_lr, decay=1e-6, momentum=0.9, nesterov=True)
     steps = Xa_train.shape[0] // batch_size
-    # 在第一阶段，无hard triplets
+    # First step，no hard triplets
     if epoch == 0:
         gen_hard = SemiHardTripletGenerator(id_to_classid, Xa_train, Xp_train, batch_size, all_traces,
                                             all_traces_train_idx, None)
@@ -154,7 +146,6 @@ def loacl_train(shared_model, global_gen_hard, id_to_classid, all_traces, Xa_tra
     for e in range(local_epochs):
         train_progbar = utils.Progbar(steps)
         print('\nEpoch {}/{}'.format(e + 1, local_epochs))
-        # 按批次训练
         for i in range(steps):
             train_a, train_p, train_n = gen_hard.next_train()
             global_a, global_p, global_n = global_gen_hard.next_train()
@@ -191,7 +182,7 @@ def global_train(model, local_weights, global_data, seed_class_dict, G_model, D_
         train_acc = utils.Progbar(global_epochs)
         print('\nEpoch {}/{}'.format(e + 1, global_epochs))
         with tf.GradientTape(persistent=True) as tape:
-            feature_list = []  # 保存客户端的特征向量
+            feature_list = []  # Hold the client's feature vectors
             for i in range(client_num):
                 model.set_weights(new_weight[i])
                 steps = int(global_data.shape[0] / 40)
@@ -201,18 +192,21 @@ def global_train(model, local_weights, global_data, seed_class_dict, G_model, D_
                     feature.append(temp)
                     del temp
                 feature = tf.keras.backend.concatenate(feature, axis=0)
-                class_feature_list = []  # 保存每个类的特征向量
+                class_feature_list = []  # Hold the feature vectors for each class
                 for key in seed_class_dict:
                     index = np.array(seed_class_dict[key])
                     class_feature_list.append(tf.gather(feature, index))
                 feature_list.append(class_feature_list)
                 del feature, class_feature_list, index
-            vistual_feature, vistual_label = get_vs_feature(feature_list)  # 计算均值和方差，生成虚拟特征向量
+                
+            # Calculate the mean and variance to generate virtual feature vectors
+            vistual_feature, vistual_label = get_vs_feature(feature_list) 
             vistual_feature = tf.keras.backend.concatenate(vistual_feature, axis=0)
 
             G_losses = []
             D_losses = []
-            for i in range(client_num):  # 每个客户端的特征和虚拟特征尽可能靠近
+            # Keep each client's features and virtual features as close as possible
+            for i in range(client_num):
                 feature_c = tf.keras.backend.concatenate(feature_list[i], axis=0)
                 G_model.set_weights(G_weights[i])
                 D_model.set_weights(D_weights[i])
@@ -271,43 +265,6 @@ def global_train(model, local_weights, global_data, seed_class_dict, G_model, D_
         train_progbar_D.update(e + 1, [('discriminator loss', np.mean(D_losses[2]))])
         del vistual_feature, vistual_label, feature_list, dism_c, dism_vis, wastein
     return new_weight
-
-def test_model(model, fine_path, test_path, client, local, epoch,file_name): #仅测试单个客户端数据
-    result = []
-    for i in range(len(test_path)):
-        npzfile = np.load(fine_path[i], allow_pickle=True, encoding='latin1')
-        fine_data = npzfile['data']
-        fine_label = npzfile["labels"]
-        npzfile.close()
-
-        npzfile = np.load(test_path[i], allow_pickle=True, encoding='latin1')
-        test_data = npzfile['data']
-        test_label = npzfile["labels"]
-        npzfile.close()
-
-        n_shot = [1, 5, 10, 15, 20]
-        class_num = len(set(fine_label))
-        for shot in n_shot:
-            if shot == 20:
-                x_train, y_train = fine_data, fine_label
-            else:
-                x_train, _, y_train, _ = train_test_split(fine_data, fine_label, train_size=shot * class_num,
-                                                          random_state=42,stratify=fine_label)
-            _,emb_train = model.predict(x_train)
-
-            knn = KNeighborsClassifier(n_neighbors=shot, weights='distance', p=2, metric='cosine', algorithm='brute')
-            knn.fit(emb_train, y_train)
-
-            _,emb_test = model.predict(test_data)
-            acc_knn_top1 = accuracy_score(test_label, knn.predict(emb_test))
-            result.append("{}->{} {}shot : acc = {}".format(client, i, shot, acc_knn_top1))
-        result.append("\n")
-
-    with open(file_name + "log.txt", "a") as f:
-        f.write("---------------------epoch:{} {}:{}--------------------\n".format(epoch, local, client))
-        for res in result:
-            f.write(res + "\n")
-    f.close()
 
 def test_model_other(model, fine_path, test_path, client, local, epoch,file_name): #测试混合的
 
@@ -374,7 +331,7 @@ def test_model_other(model, fine_path, test_path, client, local, epoch,file_name
 
 
 def my_train():
-    # 建立一个初始化模型
+    # Build an initialization model
     shared_model = DF((trace_len, 1), emb_size)
     print(shared_model.summary())
 
@@ -387,7 +344,7 @@ def my_train():
     data_path = ["./dataset/ori/AWF_100w_2500tr.npz", "./dataset/ori/Wang_100w_90tr.npz",
                  "./dataset/ori/DS19_100w_100tr.npz", "./dataset/ori/NoDef_95w_800tr.npz"]
 
-    # 写日志
+    # Write logs
     file_time = str(datetime.now())[:19]
     file_time = file_time.replace(':', '-')
     file_name = "./result/ours/" + file_time + "/"
@@ -458,7 +415,7 @@ def my_train():
 
     seed_data, seed_label, global_gen_hard, global_traces, seed_class_dict = global_int(seed_data_path)
 
-    # 保存每个客户端的参数
+    # Save the parameters for each client
     id_to_classid = []
     all_traces = []
     Xa_train = []
@@ -467,12 +424,12 @@ def my_train():
     G_weights = []
     D_weights = []
     for c in range(client_num):
-        # 筛选出其他客户端的种子
+        # Filter out the seeds of other clients
         temp_seed_data = seed_data.copy()
         temp_seed_label = seed_label.copy()
         temp_seed_data.pop(c)
         temp_seed_label.pop(c)
-        # 初始化本地模型的数据和参数
+        # Initialize the data and parameters of the local model
         index, traces, Xa, Xp = local_init(train_data_path[c], temp_seed_data, temp_seed_label)
         id_to_classid.append(index)
         all_traces.append(traces)
@@ -482,17 +439,17 @@ def my_train():
         G_weights.append(G_model.get_weights())
         D_weights.append(D_model.get_weights())
 
-    # 联邦训练
+    # Joint learning
     for e in range(fed_epoch):
-        # 每个客户端分别训练,上传模型
+        # Each client trains a local model separately and then uploads the local model to the server
         for c in range(client_num):
             shared_model.set_weights(local_weights[c])
             weights = loacl_train(shared_model, global_gen_hard, id_to_classid[c], all_traces[c], Xa_train[c], Xp_train[c], c, e, file_name)
             local_weights[c] = weights
             # 测试本地模型
-            #test_model(shared_model, fine_data_path, test_data_path, c, "local", e, file_name)
-            test_model_other(shared_model, fine_data_path, test_data_path, c, "local", e, file_name)
-        # 服务器端训练
+            if c == 2:
+                test_model_other(shared_model, fine_data_path, test_data_path, c, "local", e, file_name)
+        # Server-side training
         new_weights = global_train(shared_model, local_weights, seed_data, seed_class_dict, G_model, D_model, G_weights, D_weights)
         #local_weights = new_weights
         for c in range(client_num):
@@ -500,6 +457,7 @@ def my_train():
             for l in range(0, len(local_weights[c])):
                 local_weights[c][l] = (1 - float(lam)) * local_weights[c][l] + float(lam) * new_weights[c][l]
             shared_model.set_weights(local_weights[c])
-            test_model_other(shared_model, fine_data_path, test_data_path, c, "global", e, file_name)
+            if c == 2:
+                test_model_other(shared_model, fine_data_path, test_data_path, c, "global", e, file_name)
 
 my_train()
