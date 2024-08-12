@@ -26,15 +26,15 @@ def build_similarities(conv, all_imgs):
     return all_sims
 
 def build_negatives(id_to_classid,anc_idxs, pos_idxs, similarities, neg_imgs_idx, num_retries=50):
-    #  如果没有计算相似点，则返回一个随机的负数
+    #  If no similarity is calculated, a random negative number is returned
     if similarities is None:
         return random.sample(neg_imgs_idx,len(anc_idxs))
     final_neg = []
-    # 对于每一对正例
+    # For each pair of positive examples
     for (anc_idx, pos_idx) in zip(anc_idxs, pos_idxs):
         anchor_class = id_to_classid[anc_idx]
         sim = similarities[anc_idx, pos_idx]
-        # 找出所有的 semi(hard)
+        # Find out all the semi(hard)
         possible_ids = np.where((similarities[anc_idx] + 0.1) > sim)[0]
         possible_ids = list(set(neg_imgs_idx) & set(possible_ids))
         appended = False
