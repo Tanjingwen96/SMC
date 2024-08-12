@@ -1,1 +1,5 @@
-https://www.kaggle.com/datasets/tanjingwen999/dataset-of-smc
+public dataset:
+AWF: Rimmer V, Preuveneers D, Juarez M, et al. Automated website fingerprinting through deep learning[J]. arXiv preprint arXiv:1708.06376, 2017.
+Wang: Wang T, Cai X, Nithyanand R, et al. Effective attacks and provable defenses for website fingerprinting[C]//23rd USENIX Security Symposium (USENIX Security 14). 2014: 143-157.
+DS19: Gong J, Wang T. Zero-delay lightweight defenses against website fingerprinting[C]//29th USENIX Security Symposium (USENIX Security 20). 2020: 717-734.
+NoDef: Sirinam P, Imani M, Juarez M, et al. Deep fingerprinting: Undermining website fingerprinting defenses with deep learning[C]//Proceedings of the 2018 ACM SIGSAC conference on computer and communications security. 2018: 1928-1943.
